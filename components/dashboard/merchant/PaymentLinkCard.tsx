@@ -14,9 +14,9 @@ export function PaymentLinkCard({ link }: { link: PaymentLink }) {
           Open Busha Checkout ↗
         </a>
       ) : (
-        <Link href={checkoutUrl} className="mt-3 inline-block font-medium text-accent-dark transition hover:underline">
+        <a href={checkoutUrl} className="mt-3 inline-block font-medium text-accent-dark transition hover:underline">
           Open local checkout
-        </Link>
+        </a>
       )}
     </div>
   );

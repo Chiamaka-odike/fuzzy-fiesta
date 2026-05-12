@@ -11,7 +11,6 @@ import {
 import { CurrencySelector } from "./CurrencySelector";
 import { Button } from "@/components/ui/button";
 import {
-  Wallet2,
   Card2,
   CheckCircle,
   ArrowLeft,
@@ -21,11 +20,8 @@ import {
 import { toast } from "sonner";
 
 const currencySymbols: Record<string, string> = {
-  NGN: "NGN",
+  NGN: "₦",
   KES: "KES",
-  BTC: "BTC",
-  ETH: "ETH",
-  USDT: "USDT",
 };
 
 const formatter = new Intl.NumberFormat("en-NG");
@@ -42,9 +38,10 @@ export function CheckoutWidget({
   receipts: PaymentReceipt[];
   initialTransactionId?: string;
 }) {
-  const supportedCurrencies = ["BTC", "ETH", "USDT", "NGN", "KES"];
+  const supportedCurrencies = ["NGN", "KES"];
+
   const otpRef = useRef<HTMLInputElement | null>(null);
-  const [currency, setCurrency] = useState("USDT");
+  const [currency, setCurrency] = useState("NGN");
   const [transactionId, setTransactionId] = useState(
     normalizeTransactionId(initialTransactionId ?? ""),
   );
@@ -99,36 +96,61 @@ export function CheckoutWidget({
     [allReceipts, transactionId],
   );
 
-  const merchantAmount = activeReceipt?.subtotal ?? 0;
   const customerAmount = quote ? parseFloat(quote.source_amount) : 0;
-  const formattedCustomerAmount =
-    customerAmount >= 1
-      ? customerAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })
-      : customerAmount.toFixed(6);
+  const formattedCustomerAmount = customerAmount.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  });
 
   const fetchQuote = async () => {
-  if (!activeReceipt) return;
-  setQuoteLoading(true);
-  try {
-    setQuote({
-      id: `quote_mock_${Date.now()}`,
-      source_amount: (activeReceipt.subtotal / 1600).toFixed(4),
-      expires_at: new Date(Date.now() + 60_000).toISOString()
-    });
-  } finally {
-    setQuoteLoading(false);
-  }
-};
-      
-  
+    if (!activeReceipt) return;
+    setQuoteLoading(true);
+    try {
+      // KES rough conversion rate — swap for live rate when ready
+      const amount =
+        currency === "KES"
+          ? (activeReceipt.subtotal * 0.55).toFixed(2)
+          : activeReceipt.subtotal.toFixed(2);
+
+      setQuote({
+        id: `quote_mock_${Date.now()}`,
+        source_amount: amount,
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      });
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
+
   const handlePayment = async (method: string) => {
-  if (!quote) {
-    toast.error("No quote available. Please go back and try again.");
-    return;
-  }
-  toast.success(`Payment successful via ${method}!`);
-  setStep("success");
-};
+    if (!quote || !activeReceipt) {
+      toast.error("No quote available. Please go back and try again.");
+      return;
+    }
+    try {
+      toast.loading("Preparing payment...");
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: activeReceipt.subtotal,
+          currency,
+          title: `Payment to ${merchant.storeName}`,
+          email: "customer@flux.app",
+        }),
+      });
+      const data = await res.json();
+      if (data.hostedUrl) {
+        toast.dismiss();
+        window.location.href = data.hostedUrl;
+      } else {
+        throw new Error(data.error ?? "No checkout URL returned");
+      }
+    } catch (error) {
+      toast.dismiss();
+      toast.error("Failed to create checkout. Please try again.");
+      console.error("Payment error:", error);
+    }
+  };
 
   if (step === "success") {
     return (
@@ -143,9 +165,9 @@ export function CheckoutWidget({
           Payment Successful!
         </h2>
         <p className="text-[#6e5a46] mb-8">
-          Your payment of {formattedCustomerAmount}{" "}
-          {currencySymbols[currency] ?? currency} has been confirmed. The
-          merchant has been notified.
+          Your payment of {currencySymbols[currency] ?? currency}{" "}
+          {formattedCustomerAmount} has been confirmed. The merchant has been
+          notified.
         </p>
         <div className="bg-[#fdf8f3] rounded-2xl p-6 mb-8 text-left space-y-3">
           <div className="flex justify-between text-sm">
@@ -160,7 +182,7 @@ export function CheckoutWidget({
           <div className="flex justify-between font-bold">
             <span>Total Paid</span>
             <span>
-              {formattedCustomerAmount} {currencySymbols[currency] ?? currency}
+              {currencySymbols[currency] ?? currency} {formattedCustomerAmount}
             </span>
           </div>
         </div>
@@ -176,8 +198,10 @@ export function CheckoutWidget({
 
   return (
     <section className="grid overflow-hidden rounded-[28px] border border-[#ddcdb9] bg-[#f8f1e7] shadow-[0_24px_60px_rgba(77,54,31,0.12)] md:grid-cols-[1.05fr_1fr]">
+      {/* Left panel */}
       <div className="flex min-h-[620px] flex-col justify-between border-r border-[#e4d4c1] bg-[radial-gradient(circle_at_top_left,_rgba(250,204,21,0.16),_transparent_38%),linear-gradient(180deg,_#f8f1e7,_#f1e5d6)] px-8 py-10 md:px-10">
         <div className="space-y-10">
+          {/* Merchant info */}
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#facc15] text-lg font-bold text-black shadow-sm">
               {(merchant.storeName[0] ?? "F").toUpperCase()}
@@ -192,6 +216,7 @@ export function CheckoutWidget({
             </div>
           </div>
 
+          {/* Checkout steps */}
           <div>
             <p className="font-serif text-sm uppercase tracking-[0.3em] text-[#9b8468]">
               Checkout Session
@@ -222,6 +247,7 @@ export function CheckoutWidget({
             </div>
           </div>
 
+          {/* Receipt total */}
           <div className="space-y-4">
             <p className="font-serif text-sm uppercase tracking-[0.3em] text-[#9b8468]">
               Receipt total
@@ -230,7 +256,7 @@ export function CheckoutWidget({
               {activeReceipt ? (
                 <>
                   <p className="font-serif text-4xl font-medium text-zinc-900">
-                    N{formatter.format(activeReceipt.subtotal)}
+                    ₦{formatter.format(activeReceipt.subtotal)}
                   </p>
                   <p className="mt-2 text-sm text-[#7d6852]">
                     {activeReceipt.items.length} items • settles in{" "}
@@ -250,14 +276,15 @@ export function CheckoutWidget({
             </div>
           </div>
 
+          {/* Customer pays */}
           {activeReceipt && (
             <div className="rounded-2xl border border-[#ddcdb9] bg-[#fbf6ef] px-4 py-4 shadow-[0_10px_24px_rgba(77,54,31,0.08)] animate-in slide-in-from-bottom-2">
               <p className="text-xs uppercase tracking-widest text-[#9b8468]">
                 Customer pays
               </p>
               <p className="mt-2 font-serif text-2xl font-medium text-zinc-900">
-                {formattedCustomerAmount}{" "}
-                {currencySymbols[currency] ?? currency}
+                {currencySymbols[currency] ?? currency}{" "}
+                {formattedCustomerAmount}
               </p>
               <p className="mt-1 text-sm text-[#7d6852]">
                 Calculated at current market rates
@@ -271,6 +298,7 @@ export function CheckoutWidget({
         </p>
       </div>
 
+      {/* Right panel */}
       <div className="flex min-h-[620px] flex-col justify-center bg-[#fdf8f2] px-8 py-10 md:px-12">
         <div className="mx-auto w-full max-w-[420px] space-y-6">
           {step === "id" ? (
@@ -326,13 +354,15 @@ export function CheckoutWidget({
 
               <Button
                 className="w-full rounded-full py-7 text-lg bg-[#facc15] text-black hover:bg-[#eab308] shadow-lg shadow-yellow-500/10"
-                disabled={transactionId.length < 6 || !activeReceipt}
+                disabled={
+                  transactionId.length < 6 || !activeReceipt || quoteLoading
+                }
                 onClick={async () => {
                   await fetchQuote();
                   setStep("confirm");
                 }}
               >
-                Confirm Receipt
+                {quoteLoading ? "Loading..." : "Confirm Receipt"}
               </Button>
             </>
           ) : (
@@ -354,32 +384,16 @@ export function CheckoutWidget({
                   Choose Payment Method
                 </h2>
                 <p className="text-sm text-[#7d6852]">
-                  Final amount: {formattedCustomerAmount} {currency}
+                  Final amount: {currencySymbols[currency] ?? currency}{" "}
+                  {formattedCustomerAmount}
                 </p>
               </div>
 
               <div className="grid gap-3">
+                {/* Dollar Account */}
                 <Button
                   variant="outline"
-                  className="h-16 justify-between rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
-                  onClick={() => handlePayment("Web3 Wallet")}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="size-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-100">
-                      <Wallet2 className="size-5" />
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-bold">Web3 Wallet</p>
-                      <p className="text-[10px] text-muted-foreground uppercase">
-                        MetaMask, Trust, Phantom
-                      </p>
-                    </div>
-                  </div>
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-16 justify-between rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
+                  className="h-16 justify-start rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
                   onClick={() => handlePayment("Dollar Account")}
                 >
                   <div className="flex items-center gap-3">
@@ -389,15 +403,16 @@ export function CheckoutWidget({
                     <div className="text-left">
                       <p className="text-sm font-bold">Dollar Account</p>
                       <p className="text-[10px] text-muted-foreground uppercase">
-                        Pay with Busha USD
+                        Pay with USD balance
                       </p>
                     </div>
                   </div>
                 </Button>
 
+                {/* Card */}
                 <Button
                   variant="outline"
-                  className="h-16 justify-between rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
+                  className="h-16 justify-start rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
                   onClick={() => handlePayment("Card")}
                 >
                   <div className="flex items-center gap-3">
@@ -413,9 +428,10 @@ export function CheckoutWidget({
                   </div>
                 </Button>
 
+                {/* Bank Transfer */}
                 <Button
                   variant="outline"
-                  className="h-16 justify-between rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
+                  className="h-16 justify-start rounded-2xl border-[#ddcdb9] bg-white hover:bg-[#fdfaf5] group"
                   onClick={() => handlePayment("Transfer")}
                 >
                   <div className="flex items-center gap-3">
